@@ -22,9 +22,9 @@ def process_video(input_path, output_path, args):
     max_text_width = int(w * 0.85)
     
     # Tamanhos de fonte proporcionais à altura do vídeo
-    fontsize_word = int(h * 0.08)
+    fontsize_word = int(h * 0.042)
     fontsize_pos = int(h * 0.04)
-    fontsize_def = int(h * 0.035)
+    fontsize_def = int(h * 0.045)
     
     try:
         # Texto 1: A Palavra (Fonte Maior)
@@ -59,14 +59,15 @@ def process_video(input_path, output_path, args):
         print(f"Erro ao gerar textos (verifique se as fontes .ttf informadas existem e são válidas): {e}")
         return
 
-    # Calcular o eixo Y de baixo para cima para alinhar empilhado
-    y_def = h - padding_bottom - clip_def.h
-    y_pos = y_def - clip_pos.h - int(h * 0.015)
-    y_word = y_pos - clip_word.h - int(h * 0.015)
+    # Calcular o eixo Y a partir do centro vertical para o primeiro texto
+    y_word = int((h - clip_word.h) / 2)
+    y_pos = y_word + clip_word.h - int(h * 0.032)
+    y_def = y_pos + clip_pos.h - int(h * 0.015)
     
     # Aplicar posicionamento e duração (mesma duração do vídeo cortado)
     clip_word = clip_word.set_position((padding_left, y_word)).set_duration(video.duration)
-    clip_pos = clip_pos.set_position((padding_left, y_pos)).set_duration(video.duration)
+    # Desloca a classe gramatical ligeiramente para a esquerda para compensar a margem da fonte cursiva
+    clip_pos = clip_pos.set_position((padding_left - int(w * 0.007), y_pos)).set_duration(video.duration)
     clip_def = clip_def.set_position((padding_left, y_def)).set_duration(video.duration)
     
     # Criar composição final
@@ -108,6 +109,11 @@ def main():
     
     args = parser.parse_args()
     
+    # Trata quebras de linha literais (\n) recebidas do terminal/CLI
+    args.word = args.word.replace('\\n', '\n')
+    args.pos = args.pos.replace('\\n', '\n')
+    args.definition = args.definition.replace('\\n', '\n')
+    
     # Cria os diretórios caso não existam
     os.makedirs(args.input_dir, exist_ok=True)
     os.makedirs(args.output_dir, exist_ok=True)
@@ -123,8 +129,9 @@ def main():
         return
         
     for video_path in videos:
-        filename = os.path.basename(video_path)
-        output_path = os.path.join(args.output_dir, f"edited_{filename}")
+        _, ext = os.path.splitext(video_path)
+        safe_word = args.word.replace('\n', '').strip()
+        output_path = os.path.join(args.output_dir, f"{safe_word}{ext}")
         process_video(video_path, output_path, args)
 
 if __name__ == "__main__":
