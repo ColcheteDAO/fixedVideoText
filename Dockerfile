@@ -11,6 +11,9 @@ RUN apt-get update && \
 RUN mkdir -p /etc/ImageMagick-6 /etc/ImageMagick-7 && \
     echo '<policymap><policy domain="resource" name="memory" value="2GiB"/><policy domain="resource" name="map" value="4GiB"/><policy domain="resource" name="width" value="16KP"/><policy domain="resource" name="height" value="16KP"/><policy domain="resource" name="area" value="256MB"/><policy domain="resource" name="disk" value="2GiB"/></policymap>' | tee /etc/ImageMagick-6/policy.xml /etc/ImageMagick-7/policy.xml > /dev/null
 
+ENV LANG=C.UTF-8
+ENV PYTHONIOENCODING=utf-8
+
 WORKDIR /app
 
 # Instalar dependências Python

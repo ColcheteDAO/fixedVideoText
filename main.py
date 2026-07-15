@@ -1,3 +1,4 @@
+import re
 import os
 import argparse
 import glob
@@ -9,8 +10,12 @@ def process_video(input_path, output_path, args):
     
     # Lógica de corte (subclip)
     start = args.start_time if args.start_time else 0
-    end = args.end_time if args.end_time else video.duration
     
+    if str(args.end_time) == "-1":
+        end = video.duration
+    else:
+        end = args.end_time if args.end_time else video.duration
+        
     if args.start_time or args.end_time:
         video = video.subclip(start, end)
     
@@ -61,13 +66,13 @@ def process_video(input_path, output_path, args):
 
     # Calcular o eixo Y a partir do centro vertical para o primeiro texto
     y_word = int((h - clip_word.h) / 2)
-    y_pos = y_word + clip_word.h - int(h * 0.032)
-    y_def = y_pos + clip_pos.h - int(h * 0.015)
+    y_pos = y_word + clip_word.h - int(h * 0.025)
+    y_def = y_pos + clip_pos.h - int(h * 0.025)
     
     # Aplicar posicionamento e duração (mesma duração do vídeo cortado)
     clip_word = clip_word.set_position((padding_left, y_word)).set_duration(video.duration)
     # Desloca a classe gramatical ligeiramente para a esquerda para compensar a margem da fonte cursiva
-    clip_pos = clip_pos.set_position((padding_left - int(w * 0.007), y_pos)).set_duration(video.duration)
+    clip_pos = clip_pos.set_position((padding_left - int(w * 0.002), y_pos)).set_duration(video.duration)
     clip_def = clip_def.set_position((padding_left, y_def)).set_duration(video.duration)
     
     # Criar composição final
@@ -81,8 +86,23 @@ def process_video(input_path, output_path, args):
         fps=video.fps,
         preset="fast"
     )
+    
+    # Fechar os clips para liberar os arquivos e evitar erros de permissão ao deletar no Windows
+    video.close()
+    clip_word.close()
+    clip_pos.close()
+    clip_def.close()
+    final_video.close()
+    
     print("Processamento concluído.\n")
 
+
+def fix_encoding(text):
+    # Se o texto veio do PowerShell do Windows, ele pode ter sido lido como CP1252 em vez de UTF-8
+    try:
+        return text.encode('cp1252').decode('utf-8')
+    except (UnicodeEncodeError, UnicodeDecodeError):
+        return text
 
 def main():
     parser = argparse.ArgumentParser(description="Processador de Vídeo: Adiciona blocos de texto estilizados")
@@ -109,10 +129,15 @@ def main():
     
     args = parser.parse_args()
     
-    # Trata quebras de linha literais (\n) recebidas do terminal/CLI
-    args.word = args.word.replace('\\n', '\n')
-    args.pos = args.pos.replace('\\n', '\n')
-    args.definition = args.definition.replace('\\n', '\n')
+    # Corrige encoding quebrado pelo terminal do Windows
+    args.word = fix_encoding(args.word)
+    args.pos = fix_encoding(args.pos)
+    args.definition = fix_encoding(args.definition)
+    
+    # Trata quebras de linha literais (\n) recebidas do terminal/CLI e remove espaços ao redor
+    args.word = re.sub(r'\s*\\n\s*', '\n', args.word)
+    args.pos = re.sub(r'\s*\\n\s*', '\n', args.pos)
+    args.definition = re.sub(r'\s*\\n\s*', '\n', args.definition)
     
     # Cria os diretórios caso não existam
     os.makedirs(args.input_dir, exist_ok=True)
@@ -128,11 +153,66 @@ def main():
         print(f"Nenhum vídeo compatível encontrado em {args.input_dir}")
         return
         
-    for video_path in videos:
-        _, ext = os.path.splitext(video_path)
-        safe_word = args.word.replace('\n', '').strip()
-        output_path = os.path.join(args.output_dir, f"{safe_word}{ext}")
-        process_video(video_path, output_path, args)
+    videos = sorted(videos)
+
+    # Se houver apenas 1 vídeo, verificar se precisa dividir em partes de 20 segundos
+    if len(videos) == 1:
+        video_path = videos[0]
+        try:
+            clip = VideoFileClip(video_path)
+            duration = clip.duration
+            if duration > 20.0:
+                print(f"Apenas um vídeo encontrado e sua duração é {duration:.2f}s. Dividindo em subvídeos de 20s...")
+                base_name, ext = os.path.splitext(os.path.basename(video_path))
+                chunk_length = 20
+                num_chunks = int(duration // chunk_length)
+                if duration % chunk_length > 0.1: # Evita criar chunks minúsculos no final (menos de 0.1s)
+                    num_chunks += 1
+                
+                new_videos = []
+                for i in range(num_chunks):
+                    start_cut = i * chunk_length
+                    end_cut = min((i + 1) * chunk_length, duration)
+                    subclip = clip.subclip(start_cut, end_cut)
+                    chunk_name = f"{base_name}_part_{i+1:03d}{ext}"
+                    chunk_path = os.path.join(args.input_dir, chunk_name)
+                    print(f"Salvando parte {i+1}: {chunk_path}")
+                    subclip.write_videofile(
+                        chunk_path, 
+                        codec="libx264", 
+                        audio_codec="aac",
+                        fps=clip.fps,
+                        preset="fast"
+                    )
+                    new_videos.append(chunk_path)
+                
+                clip.close()
+                os.remove(video_path)
+                print(f"Vídeo original removido: {video_path}")
+                videos = sorted(new_videos)
+            else:
+                clip.close()
+        except Exception as e:
+            print(f"Erro ao tentar dividir o vídeo: {e}")
+            return
+
+    # Processa apenas o PRIMEIRO vídeo
+    video_to_process = videos[0]
+    _, ext = os.path.splitext(video_to_process)
+    safe_word = args.word.replace('\n', '').strip()
+    
+    # Garante que o nome do arquivo de saída seja seguro (removendo caracteres indesejados)
+    safe_word_file = "".join(c for c in safe_word if c.isalnum() or c in " _-")
+    output_path = os.path.join(args.output_dir, f"{safe_word_file}{ext}")
+    
+    process_video(video_to_process, output_path, args)
+    
+    # Exclui o vídeo original do input após o processamento
+    try:
+        os.remove(video_to_process)
+        print(f"Vídeo processado removido do input: {video_to_process}")
+    except Exception as e:
+        print(f"Erro ao remover o vídeo do input: {e}")
 
 if __name__ == "__main__":
     main()
