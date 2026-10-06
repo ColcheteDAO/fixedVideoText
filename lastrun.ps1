@@ -30,6 +30,11 @@ processor-video-text python main.py `
 --pos "$pos" `
 --definition "$definition"
 
+if ($LASTEXITCODE -ne 0) {
+    Write-Error "Falha na execução do container Docker (código de saída: $LASTEXITCODE)."
+    exit $LASTEXITCODE
+}
+
 # Definir as pastas
 $outputDir = "C:\Users\juanc\Videos\tiktok\dicionario"
 $destDir = "\\TRUENAS\goldenChest\videos\tiktok\dicionario"
